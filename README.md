@@ -148,8 +148,34 @@ Default is the **paper port 4002**; live (4001) requires **both** `--live` and
 `--i-understand-live`. Long/flat only; MKT during RTH, LMT+`outsideRth` in pre/after
 market; positions reconciled via `reqPositions`.
 
+## Cockpit (webui)
+
+A realtime, browser-based cockpit that shows what the robot is doing: price with the
+model's exposure signal, buy/sell trade arrows, RAM (buy&hold) vs. portfolio (robot
+NAV) return, replay of any past window, and a "thinking" panel exposing the belief
+state behind each decision. **The engine is the source of truth** — every number is
+computed server-side by driving the *existing* engine (`RamRobot.on_bar`,
+`backtest.run_episode` / `nav_from_exposures`, `OnlineMarketMap.features` /
+`belief_snapshot`); the frontend only renders server-computed arrays.
+
+```bash
+pip install -r requirements-webui.txt      # flask + numpy (Plotly.js from CDN)
+python -m webui.server                      # -> http://127.0.0.1:5055  (csv=data/RAM_1min.csv)
+python -m webui.server --csv path/to.csv --port 5055
+```
+
+Timeframes `1m/10m/30m/1h/2h/day/week/month`; the robot runs at its native 1-min tick
+and coarser frames roll it up (exposure = average commitment over the bucket, NAV =
+end-of-bucket). Modes: **Replay** (a clock that streams stored bars through a fresh
+robot over SSE, driving the live scroll) is shipped; **Live** (IB Gateway paper feed)
+is the next increment. Pick a robot from `robot_export/` (if exported), the default
+phenotype, or — when `zion_ge`+`pymongo` are importable — a GE run from Mongo.
+
 ## Tests
 
 ```bash
-python -m pytest tests/test_ram.py -v
+python -m pytest tests/test_ram.py tests/test_webui.py -v
 ```
+
+`tests/test_webui.py` pins the cockpit to the engine: its `traced_episode` NAV /
+exposures must equal `run_episode` exactly, so the UI can never drift.

@@ -1,0 +1,95 @@
+# ============================================================
+# RAM Intraday Robot — hybrid micro-GA + NSGA-II (the maze sweep's BEST generalizer)
+# ============================================================
+run:
+  name: ram_intraday_hybrid_v1
+  seed: 42
+  stop_conditions:
+    max_evals: 5000
+    max_time_seconds: 21600      # 6h cap; micro-GA tournaments run on TOP of this budget
+    stagnation_window: 1500
+  checkpoint:
+    enabled: true
+    interval_evals: 20
+    path: checkpoints/ram_intraday_hybrid/
+    pareto_snapshot_interval: 10
+
+grammar:
+  name: ram_grammar
+  version: "1.0"
+  builder_module: grammars.ram_grammar
+  builder_function: build_grammar
+
+problem:
+  type: custom
+  eval_module: fitness
+  eval_function: evaluate
+  param_dim: 7
+  param_lower: 0.0
+  param_upper: 1.0
+
+islands:
+  defaults:
+    population_size: 40
+    selection_algo: nsga2
+    operator_rates: {crossover: 0.6, mutation: 0.3, param_mutation: 0.15}
+    elitism_ratio: 0.15
+    replacement_strategy: steady_state
+  overrides:
+    "explorer":
+      operator_rates: {crossover: 0.4, mutation: 0.5, param_mutation: 0.15}
+    "exploiter":
+      operator_rates: {crossover: 0.7, mutation: 0.2, param_mutation: 0.1}
+    "balanced":
+      operator_rates: {crossover: 0.6, mutation: 0.3, param_mutation: 0.15}
+
+migration:
+  topology: ring
+  policy: {interval: 10, count: 2, selection_method: best, replacement_method: worst}
+
+evaluation:
+  timeout_seconds: 300.0
+  retries: 0
+  cache_phenotype: true
+  objectives:
+    - {name: oos_return, direction: max}
+    - {name: ulcer, direction: min}
+    - {name: robustness_gap, direction: min}
+
+executor:
+  backend: local          # workers>1 => LocalPoolExecutor (process pool)
+  workers: 12
+  ray_config: null
+
+database:
+  backend: mongodb
+  url: ${DATABASE_URL:mongodb://localhost:27017/zion}
+  pool_size: 5
+
+micro_ga:
+  enabled: true
+  num_tournaments: 16
+  eval_cache_size: 5000
+  scalarization:
+    method: augmented_tchebycheff
+    weights: null
+    asf_rho: 0.05
+  codec:
+    bits_per_float: 16
+    bits_per_int: 8
+    bits_per_categorical: 4
+  tournament:
+    population_size: 25
+    convergence_threshold: 0.05
+    max_generations: 150
+    elitism_count: 1
+    crossover_type: uniform
+    crossover_rate: 0.9
+  olympic:
+    pool_max_size: 30
+    dedup_hamming_threshold: 0.02
+    game_rounds: 3
+    trigger: champion_count
+    champion_count_trigger: 6
+    timer_trigger_seconds: 120.0
+    eval_quota_fraction: 0.1

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Market data (broker-sourced; regenerate with data_download.py)
+data/*.csv
+
+# Generated artifacts
+robot_export/
+checkpoints/
+*.ckpt
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

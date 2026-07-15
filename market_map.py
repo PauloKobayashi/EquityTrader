@@ -235,6 +235,45 @@ class OnlineMarketMap:
         bins = np.clip(np.digitize(arr, edges) - 1, 0, self.ladder_bins - 1)
         return float(np.count_nonzero(bins == cur_bin) / len(arr))
 
+    def belief_snapshot(self) -> dict:
+        """Raw, un-squashed internals of the current belief, for introspection.
+
+        ``features()`` returns the tanh-compressed observation the *policy* sees;
+        this returns the human-readable state behind it (real VWAP, the day's
+        realized high/low, the position's entry basis, the overnight gap). Read-only
+        — it never mutates the belief. Used by the webui 'thinking' panel; the policy
+        must not consume it (that would break the small-perception contract)."""
+        bar = self._last_bar
+        if bar is None:
+            return {
+                "ts": None, "price": None, "vwap": None,
+                "day_high": None, "day_low": None, "pos_in_range": None,
+                "entry_price": None, "overnight_gap": 0.0,
+                "exposure": float(self._exposure), "unrealized_pnl": 0.0,
+            }
+        price = float(bar.close)
+        vwap = self._day_vwap_pv / self._day_vwap_v if self._day_vwap_v > 0 else price
+        high = float(self._day_high) if np.isfinite(self._day_high) else price
+        low = float(self._day_low) if np.isfinite(self._day_low) else price
+        rng = high - low
+        pos_in_range = float(np.clip((price - low) / rng, 0.0, 1.0)) if rng > 1e-9 else 0.5
+        if self._exposure > 1e-9 and self._entry_price:
+            unrealized = price / self._entry_price - 1.0
+        else:
+            unrealized = 0.0
+        return {
+            "ts": bar.ts,
+            "price": price,
+            "vwap": float(vwap),
+            "day_high": high,
+            "day_low": low,
+            "pos_in_range": pos_in_range,
+            "entry_price": float(self._entry_price) if self._entry_price else None,
+            "overnight_gap": float(self._overnight_gap),
+            "exposure": float(np.clip(self._exposure, 0.0, 1.0)),
+            "unrealized_pnl": float(unrealized),
+        }
+
     # -- convenience --------------------------------------------------------
 
     @property

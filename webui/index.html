@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAM Cockpit</title>
+<script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+<style>
+  :root {
+    --bg:#0e0e14; --panel:#14141c; --panel2:#1a1a24; --line:#252530;
+    --fg:#c8c8d0; --dim:#888; --accent:#5b8def; --buy:#4ade80; --sell:#f87171;
+    --vwap:#e0b34a; --nav:#5b8def; --ram:#8a8a9a;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:'SF Mono','Fira Code',ui-monospace,Menlo,monospace; font-size:12px; }
+  #app { display:flex; flex-direction:column; height:100vh; }
+  header { display:flex; align-items:center; gap:14px; padding:8px 14px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:14px; margin:0; letter-spacing:1px; color:var(--fg); font-weight:600; }
+  header .spacer { flex:1; }
+  .ctl { display:flex; align-items:center; gap:5px; }
+  .ctl label { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+  select, button, input[type=range] { background:var(--panel2); color:var(--fg);
+    border:1px solid var(--line); border-radius:4px; padding:4px 7px; font-family:inherit; font-size:11px; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); color:#0e0e14; border-color:var(--accent); }
+  .seg { display:flex; }
+  .seg button { border-radius:0; border-right:none; padding:4px 8px; }
+  .seg button:first-child { border-radius:4px 0 0 4px; }
+  .seg button:last-child { border-radius:0 4px 4px 0; border-right:1px solid var(--line); }
+  .seg button.on { border-color:var(--accent); }
+  main { flex:1; display:flex; min-height:0; }
+  #charts { flex:1; display:flex; flex-direction:column; min-width:0; padding:6px; gap:6px; }
+  #chart-price { flex:3; min-height:0; }
+  #chart-exposure { flex:1; min-height:0; }
+  #chart-returns { flex:1.4; min-height:0; }
+  #side { width:320px; border-left:1px solid var(--line); background:var(--panel);
+    display:flex; flex-direction:column; overflow-y:auto; }
+  .card { padding:10px 12px; border-bottom:1px solid var(--line); }
+  .card h2 { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--dim);
+    margin:0 0 8px 0; }
+  .ret-row { display:flex; justify-content:space-between; align-items:baseline; margin:5px 0; }
+  .ret-row .lbl { color:var(--dim); }
+  .ret-row .val { font-size:18px; font-weight:600; }
+  .pos { color:var(--buy); } .neg { color:var(--sell); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:11px; }
+  .kv .k { color:var(--dim); } .kv .v { text-align:right; }
+  .feat { margin:4px 0; }
+  .feat .flabel { display:flex; justify-content:space-between; font-size:10px; color:var(--dim); }
+  .bar { height:7px; background:var(--panel2); border-radius:3px; position:relative; overflow:hidden; margin-top:2px; }
+  .bar .fill { position:absolute; top:0; bottom:0; background:var(--accent); opacity:.85; }
+  .bar .fill.neg { background:var(--sell); }
+  .rationale { font-size:11px; line-height:1.5; color:var(--fg); background:var(--panel2);
+    border-radius:4px; padding:7px 9px; margin-top:6px; min-height:20px; }
+  .rationale.buy { border-left:3px solid var(--buy); }
+  .rationale.sell { border-left:3px solid var(--sell); }
+  .rationale.hold { border-left:3px solid var(--line); }
+  #status { font-size:10px; color:var(--dim); }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--dim); margin-right:4px; }
+  .dot.live { background:var(--buy); animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .hint { font-size:10px; color:var(--dim); margin-top:4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>RAM&nbsp;COCKPIT</h1>
+    <div class="ctl"><label>robot</label><select id="sel-robot"></select></div>
+    <div class="ctl"><label>tf</label>
+      <div class="seg" id="seg-tf"></div>
+    </div>
+    <div class="ctl"><label>window</label>
+      <select id="sel-window">
+        <option value="0">All</option>
+        <option value="390">1 day</option>
+        <option value="1170">3 days</option>
+        <option value="1950">1 week</option>
+      </select>
+    </div>
+    <div class="ctl"><button id="btn-candle" class="on">Candles</button></div>
+    <div class="ctl"><button id="btn-dayfocus">Day-focus</button></div>
+    <div class="spacer"></div>
+    <div class="ctl">
+      <label>replay</label>
+      <button id="btn-play">▶ Play</button>
+      <button id="btn-step">⏭ Step</button>
+      <label>speed</label>
+      <input type="range" id="rng-speed" min="1" max="60" value="15" style="width:90px">
+      <span id="lbl-speed" style="color:var(--dim);width:34px">15×</span>
+    </div>
+    <div id="status"><span class="dot" id="dot"></span><span id="status-txt">idle</span></div>
+  </header>
+  <main>
+    <div id="charts">
+      <div id="chart-price"></div>
+      <div id="chart-exposure"></div>
+      <div id="chart-returns"></div>
+    </div>
+    <div id="side">
+      <div class="card">
+        <h2>Returns (visible window)</h2>
+        <div class="ret-row"><span class="lbl">Portfolio (robot)</span><span class="val" id="ret-port">–</span></div>
+        <div class="ret-row"><span class="lbl">RAM (buy &amp; hold)</span><span class="val" id="ret-ram">–</span></div>
+        <div class="hint" id="ret-hint"></div>
+      </div>
+      <div class="card">
+        <h2>Thinking — belief @ bar</h2>
+        <div class="kv" id="belief-kv"></div>
+        <div class="rationale hold" id="rationale">hover the price chart to inspect a bar</div>
+      </div>
+      <div class="card">
+        <h2>Observation (13 features)</h2>
+        <div id="feats"></div>
+        <div class="hint">bar bright = current · faint tick = previous bar (Δ)</div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+// ============================ STATE ==================================== //
+const S = {
+  cfg:null, robot:'default', tf:'1m', window:0, candle:true, dayFocus:false,
+  data:null,          // last /api/replay payload
+  hoverIdx:null,
+  live:false, es:null, speed:15,
+  visN:390,           // fixed visible width for the scroll behavior
+  liveBuf:null,       // rolling arrays while streaming
+};
+const plotlyLayout = {
+  paper_bgcolor:'transparent', plot_bgcolor:'transparent',
+  font:{ color:'#888', family:"'SF Mono','Fira Code',monospace", size:11 },
+  margin:{ l:52, r:16, t:14, b:26 },
+  xaxis:{ gridcolor:'#1a1a24', zerolinecolor:'#252530', type:'category', showspikes:true,
+          spikemode:'across', spikethickness:1, spikecolor:'#3a3a4a', spikedash:'dot' },
+  yaxis:{ gridcolor:'#1a1a24', zerolinecolor:'#252530' },
+  showlegend:false, hovermode:'x',
+};
+const plotlyConfig = { responsive:true, displayModeBar:false };
+
+function preserveXRange(el, layout){
+  if (el && el.layout && el.layout.xaxis && el.layout.xaxis.range && el.layout.xaxis.autorange===false){
+    layout.xaxis = {...(layout.xaxis||{}), range:[...el.layout.xaxis.range], autorange:false};
+  }
+  return layout;
+}
+const $ = id => document.getElementById(id);
+const fmtPct = v => (v>=0?'+':'') + v.toFixed(2) + '%';
+
+// ============================ INIT ==================================== //
+async function init(){
+  S.cfg = await (await fetch('/api/config')).json();
+  // timeframe segmented control
+  const seg = $('seg-tf');
+  S.cfg.timeframes.forEach(tf=>{
+    const b=document.createElement('button'); b.textContent=tf; b.dataset.tf=tf;
+    if(tf===S.tf) b.classList.add('on');
+    b.onclick=()=>{ S.tf=tf; [...seg.children].forEach(c=>c.classList.toggle('on',c.dataset.tf===tf)); loadReplay(); };
+    seg.appendChild(b);
+  });
+  // robots
+  const robots = await (await fetch('/api/robots')).json();
+  const rs=$('sel-robot');
+  robots.forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.label; rs.appendChild(o); });
+  rs.onchange=()=>{ S.robot=rs.value; loadReplay(); };
+  // controls
+  $('sel-window').onchange=e=>{ S.window=+e.target.value; loadReplay(); };
+  $('btn-candle').onclick=e=>{ S.candle=!S.candle; e.target.classList.toggle('on',S.candle); renderPrice(); };
+  $('btn-dayfocus').onclick=e=>{ S.dayFocus=!S.dayFocus; e.target.classList.toggle('on',S.dayFocus);
+    if(S.dayFocus){ S.tf='1m'; S.window=390; $('sel-window').value='390';
+      [...$('seg-tf').children].forEach(c=>c.classList.toggle('on',c.dataset.tf==='1m')); }
+    loadReplay(); };
+  $('rng-speed').oninput=e=>{ S.speed=+e.target.value; $('lbl-speed').textContent=S.speed+'×'; };
+  $('btn-play').onclick=togglePlay;
+  $('btn-step').onclick=stepOnce;
+  // hover wiring
+  $('chart-price').on = $('chart-price').on || (()=>{});
+  await loadReplay();
+}
+
+// ============================ FETCH =================================== //
+async function loadReplay(){
+  stopLive();
+  const p = new URLSearchParams({robot:S.robot, tf:S.tf});
+  if(S.window>0) p.set('window', S.window);
+  setStatus('loading…');
+  S.data = await (await fetch('/api/replay?'+p)).json();
+  S.hoverIdx = S.data.bars.close.length-1;
+  renderAll();
+  setStatus(`${S.data.family} · ${S.data.tf} · ${S.data.bars.close.length}/${S.data.n_total} bars`);
+}
+
+// ============================ RENDER ================================= //
+function renderAll(){ renderPrice(); renderExposure(); renderReturns(); renderReturnTable(); renderThinking(S.hoverIdx); }
+
+function priceTraces(d){
+  const x=d.bars.ts, traces=[];
+  if(S.candle && !S.live){    // 1-min live bars are single-price -> candles degenerate; use a line
+    traces.push({ type:'candlestick', x, open:d.bars.open, high:d.bars.high, low:d.bars.low, close:d.bars.close,
+      increasing:{line:{color:'#3fb27f'}}, decreasing:{line:{color:'#d16565'}}, name:'price',
+      whiskerwidth:0, hoverinfo:'x' });
+  } else {
+    traces.push({ type:'scatter', mode:'lines', x, y:d.bars.close, line:{color:'#7a9cc6',width:1.3}, name:'close', hoverinfo:'skip' });
+  }
+  // VWAP + day range overlays (belief)
+  const vwap=d.belief.map(b=>b.vwap), hi=d.belief.map(b=>b.day_high), lo=d.belief.map(b=>b.day_low);
+  traces.push({type:'scatter',mode:'lines',x,y:vwap,line:{color:'#e0b34a',width:1,dash:'dot'},name:'VWAP',hoverinfo:'skip',opacity:.8});
+  traces.push({type:'scatter',mode:'lines',x,y:hi,line:{color:'#2f6f52',width:.7},hoverinfo:'skip',opacity:.5});
+  traces.push({type:'scatter',mode:'lines',x,y:lo,line:{color:'#7a3b3b',width:.7},hoverinfo:'skip',opacity:.5});
+  // entry-price markers
+  const ex=[],ey=[]; d.belief.forEach((b,i)=>{ if(b.entry_price!=null){ ex.push(x[i]); ey.push(b.entry_price);} });
+  if(ex.length) traces.push({type:'scatter',mode:'markers',x:ex,y:ey,marker:{color:'#5b8def',size:3,symbol:'circle',opacity:.35},hoverinfo:'skip'});
+  // trade arrows sized by |dExposure|
+  const bx=[],by=[],bs=[],sx=[],sy=[],ss=[];
+  d.trades.forEach(t=>{ const idx=t.i-d.start_index; if(idx<0||idx>=x.length) return;
+    const sz=8+14*Math.min(1,Math.abs(t.dExposure));
+    if(t.side==='buy'){ bx.push(x[idx]); by.push(t.price); bs.push(sz);} else { sx.push(x[idx]); sy.push(t.price); ss.push(sz);} });
+  if(bx.length) traces.push({type:'scatter',mode:'markers',x:bx,y:by,marker:{symbol:'triangle-up',color:'#4ade80',size:bs,line:{color:'#0e0e14',width:.5}},name:'buy',hoverinfo:'skip'});
+  if(sx.length) traces.push({type:'scatter',mode:'markers',x:sx,y:sy,marker:{symbol:'triangle-down',color:'#f87171',size:ss,line:{color:'#0e0e14',width:.5}},name:'sell',hoverinfo:'skip'});
+  return traces;
+}
+
+function renderPrice(){
+  const el=$('chart-price'); const d=S.data; if(!d) return;
+  const lay={...plotlyLayout, xaxis:{...plotlyLayout.xaxis, rangeslider:{visible:false}, showticklabels:false},
+    yaxis:{...plotlyLayout.yaxis, title:{text:'price',font:{size:10}}, side:'left'}};
+  applyScroll(lay, d.bars.ts.length);
+  Plotly.react(el, priceTraces(d), preserveXRange(el, lay), plotlyConfig);
+  wireHover(el);
+}
+
+function renderExposure(){
+  const el=$('chart-exposure'); const d=S.data; if(!d) return;
+  const t={type:'scatter',mode:'lines',x:d.bars.ts,y:d.exposure,line:{shape:'hv',color:'#5b8def',width:1},
+    fill:'tozeroy',fillcolor:'rgba(91,141,239,0.18)',name:'exposure',hoverinfo:'skip'};
+  const lay={...plotlyLayout, margin:{l:52,r:16,t:6,b:20},
+    yaxis:{...plotlyLayout.yaxis,title:{text:'exposure',font:{size:10}},range:[0,1.02],fixedrange:true},
+    xaxis:{...plotlyLayout.xaxis, showticklabels:false}};
+  applyScroll(lay, d.bars.ts.length);
+  Plotly.react(el,[t],preserveXRange(el,lay),plotlyConfig);
+}
+
+function renderReturns(){
+  const el=$('chart-returns'); const d=S.data; if(!d) return;
+  const x=d.bars.ts;
+  const traces=[
+    {type:'scattergl',mode:'lines',x,y:d.ram_pct,line:{color:'#8a8a9a',width:1.2},fill:'tozeroy',fillcolor:'rgba(138,138,154,0.10)',name:'RAM %',hoverinfo:'skip'},
+    {type:'scattergl',mode:'lines',x,y:d.port_pct,line:{color:'#5b8def',width:1.6},fill:'tozeroy',fillcolor:'rgba(91,141,239,0.12)',name:'Portfolio %',hoverinfo:'skip'},
+  ];
+  const lay={...plotlyLayout, margin:{l:52,r:16,t:6,b:30},
+    xaxis:{...plotlyLayout.xaxis, nticks:10, tickangle:0, tickfont:{size:9}},
+    yaxis:{...plotlyLayout.yaxis,title:{text:'return %',font:{size:10}},zeroline:true,zerolinecolor:'#3a3a4a'}};
+  applyScroll(lay, x.length);
+  Plotly.react(el,traces,preserveXRange(el,lay),plotlyConfig);
+}
+
+function renderReturnTable(){
+  const d=S.data; if(!d) return;
+  const port=d.port_pct[d.port_pct.length-1]??0, ram=d.ram_pct[d.ram_pct.length-1]??0;
+  const pe=$('ret-port'), re=$('ret-ram');
+  pe.textContent=fmtPct(port); pe.className='val '+(port>=0?'pos':'neg');
+  re.textContent=fmtPct(ram);  re.className='val '+(ram>=0?'pos':'neg');
+  const edge=port-ram;
+  $('ret-hint').textContent=`edge vs buy&hold: ${fmtPct(edge)}  ·  baseline @ ${(d.baseline_price??0).toFixed(2)}`;
+}
+
+function renderThinking(idx){
+  const d=S.data; if(!d||idx==null) return;
+  idx=Math.max(0,Math.min(idx,d.bars.close.length-1));
+  const b=d.belief[idx], f=d.features[idx], fp=idx>0?d.features[idx-1]:f, names=d.feature_names;
+  // belief kv
+  const g=b.overnight_gap, u=b.unrealized_pnl;
+  $('belief-kv').innerHTML = [
+    ['time', b.ts||'–'], ['price', fmt(b.price)], ['VWAP', fmt(b.vwap)],
+    ['day high', fmt(b.day_high)], ['day low', fmt(b.day_low)],
+    ['pos in range', b.pos_in_range==null?'–':b.pos_in_range.toFixed(2)],
+    ['entry', b.entry_price==null?'flat':fmt(b.entry_price)],
+    ['overnight gap', (g*100).toFixed(2)+'%'], ['exposure', b.exposure.toFixed(2)],
+    ['unrealized', (u*100).toFixed(2)+'%'],
+  ].map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join('');
+  // feature bars (features are in [-1,1] or [0,1]; map to a signed bar around center)
+  $('feats').innerHTML = names.map((n,i)=>{
+    const v=f[i], pv=fp[i]; const w=Math.min(100,Math.abs(v)*100);
+    const neg=v<0; const left=neg?(50-w/2):50; const pw=Math.min(100,Math.abs(pv)*100); const pleft=pv<0?(50-pw/2):50;
+    return `<div class="feat"><div class="flabel"><span>${n}</span><span>${v.toFixed(2)}</span></div>
+      <div class="bar"><div class="fill ${neg?'neg':''}" style="left:${left}%;width:${w/2}%"></div>
+      <div style="position:absolute;top:0;bottom:0;width:1px;background:#555;left:${pleft+pw/2}%;opacity:.6"></div></div></div>`;
+  }).join('');
+  // rationale: is this bar a trade?
+  const tr = d.trades.find(t=>t.i-d.start_index===idx);
+  const rEl=$('rationale');
+  if(tr){ rEl.textContent=tr.rationale; rEl.className='rationale '+(tr.side==='buy'?'buy':'sell'); }
+  else { rEl.textContent = b.ts? `no trade @ ${b.ts} — exposure held at ${b.exposure.toFixed(2)}` : '—';
+    rEl.className='rationale hold'; }
+}
+const fmt = v => v==null?'–':(+v).toFixed(2);
+
+// ===================== scroll behaviour (fill then push-left) ========= //
+// Live rendering keeps only the last visN points in view (buildLiveView slices the
+// buffer), so autorange naturally fills to the right, then scrolls older points off.
+function applyScroll(layout, n){ layout.xaxis={...layout.xaxis, autorange:true}; }
+
+// ===================== hover ========================================= //
+function wireHover(el){
+  if(el._wired) return; el._wired=true;
+  el.on('plotly_hover', ev=>{ const p=ev.points&&ev.points[0]; if(!p) return;
+    if(p.pointIndex!=null){ S.hoverIdx=p.pointIndex; renderThinking(p.pointIndex);} });
+}
+
+// ===================== replay (SSE) ================================== //
+function togglePlay(){ S.live ? stopLive() : startLive(); }
+async function startLive(){
+  S.live=true; $('btn-play').textContent='⏸ Pause'; $('btn-play').classList.add('on');
+  $('dot').classList.add('live'); setStatus('streaming…');
+  // rolling buffer seeded empty; server drives a fresh robot from bar 0
+  S.liveBuf={ts:[],close:[],exposure:[],nav:[],ram:[],port:[],belief:[],features:[],trades:[]};
+  S.liveFamily=S.data.family;
+  // baseline from the currently-loaded window (fixed reference for rebasing)
+  S.liveBase={price:S.data.baseline_price, nav:S.data.baseline_nav, names:S.data.feature_names};
+  // charts change trace structure (candles->line) between static and live; purge for a clean react
+  ['chart-price','chart-exposure','chart-returns'].forEach(id=>{const e=$(id); if(e&&e.data)Plotly.purge(e);});
+  $('chart-price')._wired=false;
+  await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({source:'replay',play:true,robot_id:S.robot,speed:S.speed,start_index:0})});
+  S.es=new EventSource('/api/stream');
+  S.es.onmessage=e=>{ let ev; try{ev=JSON.parse(e.data);}catch{return;} onTick(ev); };
+  S.es.onerror=()=>{ setStatus('stream error'); };
+}
+function stopLive(){
+  if(S._raf){ cancelAnimationFrame(S._raf); S._raf=null; }
+  if(S.es){ S.es.close(); S.es=null; }
+  if(S.live){ fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'replay',play:false})}); }
+  S.live=false; S.dirty=false;
+  $('btn-play').textContent='▶ Play'; $('btn-play').classList.remove('on'); $('dot').classList.remove('live');
+}
+function onTick(ev){
+  if(ev.done){ stopLive(); setStatus('replay complete'); return; }
+  const B=S.liveBuf, base=S.liveBase;
+  B.ts.push(ev.ts); B.close.push(ev.price); B.exposure.push(ev.exposure); B.nav.push(ev.nav);
+  B.ram.push((ev.price/base.price-1)*100); B.port.push((ev.nav/base.nav-1)*100);
+  B.belief.push(ev.belief); B.features.push(ev.features);
+  if(ev.trade) B.trades.push({i:B.ts.length-1, price:ev.price, side:ev.side, dExposure:ev.dExposure, rationale:ev.rationale});
+  S.dirty=true; scheduleRender();            // coalesce bursts into one frame
+}
+// Throttle rendering to the animation frame and window the view to the last visN
+// points, so Plotly array sizes stay bounded no matter how long the replay runs.
+function scheduleRender(){
+  if(S._raf) return;
+  S._raf=requestAnimationFrame(()=>{ S._raf=null;
+    if(!S.dirty||!S.live) return; S.dirty=false;
+    buildLiveView(); renderAll();
+    const n=S.data.bars.close.length; setStatus(`streaming… ${S.liveBuf.ts.length} bars @ ${S.liveBuf.ts[S.liveBuf.ts.length-1]}`);
+  });
+}
+function buildLiveView(){
+  const B=S.liveBuf, base=S.liveBase, N=S.visN;
+  const n=B.ts.length, s=Math.max(0,n-N), sl=a=>a.slice(s);
+  S.hoverIdx=n-s-1;
+  S.data={ robot:S.robot, family:S.liveFamily, tf:'1m', feature_names:base.names,
+    n_total:n, start_index:s, end_index:n, baseline_price:base.price, baseline_nav:base.nav,
+    bars:{ts:sl(B.ts),open:sl(B.close),high:sl(B.close),low:sl(B.close),close:sl(B.close),volume:sl(B.ts).map(()=>0)},
+    exposure:sl(B.exposure), nav:sl(B.nav), ram_pct:sl(B.ram), port_pct:sl(B.port),
+    features:sl(B.features), belief:sl(B.belief), trades:B.trades.filter(t=>t.i>=s) };
+}
+function stepOnce(){ // nudge the hover cursor forward through the visible series
+  if(S.hoverIdx!=null&&S.data){ S.hoverIdx=Math.min(S.data.bars.close.length-1, S.hoverIdx+1); renderThinking(S.hoverIdx); }
+}
+
+function setStatus(t){ $('status-txt').textContent=t; }
+window.addEventListener('resize',()=>['chart-price','chart-exposure','chart-returns'].forEach(id=>{const e=$(id); if(e&&e.data)Plotly.Plots.resize(e);}));
+init();
+</script>
+</body>
+</html>

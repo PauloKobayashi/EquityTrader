@@ -72,12 +72,15 @@
     <div class="ctl"><label>tf</label>
       <div class="seg" id="seg-tf"></div>
     </div>
-    <div class="ctl"><label>window</label>
+    <div class="ctl"><label>zoom</label>
       <select id="sel-window">
+        <option value="-1">Auto</option>
+        <option value="120">2h</option>
+        <option value="360">6h</option>
+        <option value="960">1d</option>
+        <option value="2880">3d</option>
+        <option value="6720">1w</option>
         <option value="0">All</option>
-        <option value="390">1 day</option>
-        <option value="1170">3 days</option>
-        <option value="1950">1 week</option>
       </select>
     </div>
     <div class="ctl"><button id="btn-candle" class="on">Candles</button></div>
@@ -122,7 +125,7 @@
 <script>
 // ============================ STATE ==================================== //
 const S = {
-  cfg:null, robot:'default', tf:'1m', window:0, candle:true, dayFocus:false,
+  cfg:null, robot:'default', tf:'1m', spanMin:-1, candle:true, dayFocus:false,
   data:null,          // last /api/replay payload
   hoverIdx:null,
   live:false, es:null, speed:15,
@@ -166,11 +169,12 @@ async function init(){
   robots.forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.label; rs.appendChild(o); });
   rs.onchange=()=>{ S.robot=rs.value; loadReplay(); };
   // controls
-  $('sel-window').onchange=e=>{ S.window=+e.target.value; loadReplay(); };
+  $('sel-window').onchange=e=>{ S.spanMin=+e.target.value; loadReplay(); };
   $('btn-candle').onclick=e=>{ S.candle=!S.candle; e.target.classList.toggle('on',S.candle); renderPrice(); };
   $('btn-dayfocus').onclick=e=>{ S.dayFocus=!S.dayFocus; e.target.classList.toggle('on',S.dayFocus);
-    if(S.dayFocus){ S.tf='1m'; S.window=390; $('sel-window').value='390';
+    if(S.dayFocus){ S.tf='1m'; S.spanMin=960; $('sel-window').value='960';
       [...$('seg-tf').children].forEach(c=>c.classList.toggle('on',c.dataset.tf==='1m')); }
+    else { S.spanMin=-1; $('sel-window').value='-1'; }
     loadReplay(); };
   $('rng-speed').oninput=e=>{ S.speed=+e.target.value; $('lbl-speed').textContent=S.speed+'×'; };
   $('btn-play').onclick=togglePlay;
@@ -181,10 +185,22 @@ async function init(){
 }
 
 // ============================ FETCH =================================== //
+// Each timeframe auto-zooms to a sensible recent span (finer tf => tighter zoom),
+// instead of always dumping the full history. The zoom dropdown overrides with an
+// explicit span; day/week/month always show all their (few) buckets.
+function bucketMinutes(tf){ return {'1m':1,'10m':10,'30m':30,'1h':60,'2h':120}[tf]||null; }
+const AUTO_BUCKETS={'1m':120,'10m':120,'30m':96,'1h':72,'2h':48};   // ~2h,~20h,~2d,~3d,~4d
+function windowBuckets(){
+  const bm=bucketMinutes(S.tf);
+  if(S.spanMin===0 || bm===null) return 0;            // All (or coarse frame)
+  if(S.spanMin<0) return AUTO_BUCKETS[S.tf]||0;       // Auto: per-tf default zoom
+  return Math.max(10, Math.round(S.spanMin/bm));      // explicit span -> bucket count
+}
 async function loadReplay(){
   stopLive();
   const p = new URLSearchParams({robot:S.robot, tf:S.tf});
-  if(S.window>0) p.set('window', S.window);
+  const w = windowBuckets();
+  if(w>0) p.set('window', w);
   setStatus('loading…');
   S.data = await (await fetch('/api/replay?'+p)).json();
   S.hoverIdx = S.data.bars.close.length-1;

@@ -69,17 +69,19 @@
   <header>
     <h1>RAM&nbsp;COCKPIT</h1>
     <div class="ctl"><label>robot</label><select id="sel-robot"></select></div>
-    <div class="ctl"><label>tf</label>
+    <div class="ctl"><label>candle</label>
       <div class="seg" id="seg-tf"></div>
     </div>
     <div class="ctl"><label>zoom</label>
       <select id="sel-window">
         <option value="-1">Auto</option>
-        <option value="120">2h</option>
+        <option value="120" selected>2h</option>
         <option value="360">6h</option>
-        <option value="960">1d</option>
-        <option value="2880">3d</option>
-        <option value="6720">1w</option>
+        <option value="1440">1d</option>
+        <option value="4320">3d</option>
+        <option value="10080">1w</option>
+        <option value="20160">2w</option>
+        <option value="43200">1mo</option>
         <option value="0">All</option>
       </select>
     </div>
@@ -125,7 +127,7 @@
 <script>
 // ============================ STATE ==================================== //
 const S = {
-  cfg:null, robot:'default', tf:'1m', spanMin:-1, candle:true, dayFocus:false,
+  cfg:null, robot:'default', tf:'1m', spanMin:120, candle:true, dayFocus:false,
   data:null,          // last /api/replay payload
   hoverIdx:null,
   live:false, es:null, speed:15,
@@ -170,9 +172,10 @@ async function init(){
   rs.onchange=()=>{ S.robot=rs.value; loadReplay(); };
   // controls
   $('sel-window').onchange=e=>{ S.spanMin=+e.target.value; loadReplay(); };
-  $('btn-candle').onclick=e=>{ S.candle=!S.candle; e.target.classList.toggle('on',S.candle); renderPrice(); };
+  $('btn-candle').onclick=e=>{ S.candle=!S.candle; e.target.classList.toggle('on',S.candle);
+    e.target.textContent=S.candle?'Candles':'Line'; renderPrice(); };
   $('btn-dayfocus').onclick=e=>{ S.dayFocus=!S.dayFocus; e.target.classList.toggle('on',S.dayFocus);
-    if(S.dayFocus){ S.tf='1m'; S.spanMin=960; $('sel-window').value='960';
+    if(S.dayFocus){ S.tf='1m'; S.spanMin=1440; $('sel-window').value='1440';
       [...$('seg-tf').children].forEach(c=>c.classList.toggle('on',c.dataset.tf==='1m')); }
     else { S.spanMin=-1; $('sel-window').value='-1'; }
     loadReplay(); };
@@ -185,16 +188,17 @@ async function init(){
 }
 
 // ============================ FETCH =================================== //
-// Each timeframe auto-zooms to a sensible recent span (finer tf => tighter zoom),
-// instead of always dumping the full history. The zoom dropdown overrides with an
-// explicit span; day/week/month always show all their (few) buckets.
-function bucketMinutes(tf){ return {'1m':1,'10m':10,'30m':30,'1h':60,'2h':120}[tf]||null; }
-const AUTO_BUCKETS={'1m':120,'10m':120,'30m':96,'1h':72,'2h':48};   // ~2h,~20h,~2d,~3d,~4d
+// Candle period (S.tf) and zoom span (S.spanMin, in minutes) are INDEPENDENT:
+// candle sets the bucket size, zoom sets how much time is visible. windowBuckets
+// converts the chosen span into a bucket count for the current candle size, so any
+// combination works (e.g. a 1-week zoom with day candles = ~7 candles).
+function bucketMinutes(tf){ return {'1m':1,'10m':10,'30m':30,'1h':60,'2h':120,
+  'day':1440,'week':10080,'month':43200}[tf]||1; }
+const AUTO_BUCKETS={'1m':120,'10m':120,'30m':96,'1h':72,'2h':48,'day':0,'week':0,'month':0};
 function windowBuckets(){
-  const bm=bucketMinutes(S.tf);
-  if(S.spanMin===0 || bm===null) return 0;            // All (or coarse frame)
-  if(S.spanMin<0) return AUTO_BUCKETS[S.tf]||0;       // Auto: per-tf default zoom
-  return Math.max(10, Math.round(S.spanMin/bm));      // explicit span -> bucket count
+  if(S.spanMin===0) return 0;                          // All
+  if(S.spanMin<0) return AUTO_BUCKETS[S.tf]||0;        // Auto: per-candle default zoom
+  return Math.max(1, Math.round(S.spanMin/bucketMinutes(S.tf)));  // span -> bucket count
 }
 async function loadReplay(){
   stopLive();
